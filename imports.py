@@ -5,6 +5,7 @@ import hashlib
 import pathlib
 from io import FileIO, IOBase, BytesIO
 from os import urandom, remove, path as _path, stat
+from string import ascii_letters, digits, printable
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes as crypto_hashes, hmac as crypto_hmac
 from cryptography.hazmat.primitives import serialization as crypto_serial

@@ -1,3 +1,92 @@
+from constants import sha512
+from imports import ascii_letters, digits, printable, hashlib
+
+
+class SanitizerHandler:
+    def handle(self, string: str, on_error: callable) -> str:
+        return string
+
+class Sanitizer:
+
+    # Placeholder
+    class Mode:
+        pass
+
+    class Error:
+        
+        # Implementation error
+        class SanitizerError(Exception):
+            pass
+
+        # Error handling rules
+        class Strict:
+            pass
+        class Silent:
+            pass
+        
+
+    class Printable(SanitizerHandler):
+        allowed = printable
+
+        def handle(self, string: str, on_error: callable) -> str:
+            temp = ""
+
+            for char in string:
+                if char in self.allowed:
+                    temp += char
+                else:
+                    on_error(string)
+            
+            return temp
+           # if not all(char in self.allowed for char in string)
+    
+
+    class Set(SanitizerHandler):
+        allowed: list[str,] = []
+        disallowed: list[str,] = []
+
+        def __init__(self, allowed: list[str,], disallowed: list[str,] = None) -> None:
+            
+            if not isinstance(allowed, list) or not isinstance(disallowed, list | None):
+                raise TypeError("`allowed` must be a list and `disallowed` must be a list or None")
+            elif not all(isinstance(i, str) for i in allowed + disallowed):
+                raise ValueError("Members of `allowed` and `disallowed` must be strings")
+            
+            self.allowed = allowed
+            self.disallowed = disallowed
+    
+
+    class Escaped(SanitizerHandler):
+        pass
+
+class _Mode:
+    def __eq__(self, value: object) -> bool:
+        return isinstance(value, (Sanitizer.Printable, Sanitizer.Escaped, Sanitizer.Set))
+
+Sanitizer.Mode = _Mode
+
+
+def sanitize(string: str, mode: Sanitizer.Mode = Sanitizer.Mode, errors: Sanitizer.Error = Sanitizer.Error.Strict) -> str | ValueError:
+    
+    # Validate param types
+    if not isinstance(string, str) or not isinstance(mode, (Sanitizer.Printable, Sanitizer.Escaped, Sanitizer.Set)):
+        raise TypeError
+    
+    # Evaluate error mode and build handler
+    match errors:
+        case Sanitizer.Error.Strict:
+            def _on_error(string: str):
+                raise ValueError("String not allowed")
+        case Sanitizer.Error.Silent:
+            def _on_error(string: str):
+                pass
+    
+    on_error = _on_error
+
+    string = mode.handle(string, on_error)
+
+
+
 def xor(a, *b):
     a = tobytes(a)
     r = a
@@ -107,7 +196,7 @@ def run_length_decode(data, errors='strict', replace_with=b'\x3f'):
 
     errors = errors.lower()
 
-    if errors in ('strict', 'replace', 'ignore'):
+    if errors not in ('strict', 'replace', 'ignore'):
         raise TypeError('Errors must be "strict", "replace", or "ignore".')
 
     r = []
@@ -151,7 +240,7 @@ def run_length_encode(*data):
 
 def named_field_run_length_encode(obj: dict={},**data):
     r = b''
-    if not isinstance(obj, dict) or not all(map(lambda kv: isinstance(kv, str), dict.keys + dict.values)):
+    if not isinstance(obj, dict) or not all(map(lambda kv: isinstance(kv, str), (*dict.keys(),) + (*dict.values(),))):
         raise TypeError("obj must be a dict with the format: {'strKey': 'strValue', ...}")
     
     for key in data:

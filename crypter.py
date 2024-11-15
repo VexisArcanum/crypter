@@ -6,25 +6,24 @@ from util import *
 
 class Crypter:
     """
-        Higher level abstractions for cryptography (crypto) library's symmetric ciphers.
+        Higher level helpers for cryptography.io symmetric ciphers.
 
         The Crypter class handles all symmetric encryption/decryption options available through
-        crypto.hazmat.primitives.ciphers.algorithms. It can perform a simple encrypt (AES, Blowfish, etc; CBC, ECB, etc)
-        and return a bytes object to ensure confidentiality,  hmac_encrypt to ensure integrity, and a buffered_encrypt
-        mode to conserve memory (default buffer ~1MB). Buffer size can be adjusted when instantiating the Crypter
-        object.
+        crypto.hazmat.primitives.ciphers.algorithms. It can perform a simple encrypt,  hmac_encrypt, 
+        and a buffered_encrypt to conserve memory (default buffer ~1MB). Buffer size can be 
+        adjusted when instantiating the Crypter object.
 
-        Only a password is needed to initialize a Crypter object that uses AES-256-CBC with a random IV. IV is assigned
-        as 'crypter.iv_or_nonce'. It is prepended to all returned ciphertexts and indexed during decryption functions.
+        Only a password is needed to initialize a Crypter object that uses AES-256-GCM with a random IV. IV is assigned
+        as 'crypter.iv_or_nonce'. It is prepended to all returned ciphertexts and used during decryption functions.
     """
-    def __init__(self, password: (str, bytes), cipherspec: (str, tuple) = 'AES-256-GCM', iv_or_nonce: bytes = None,
+    def __init__(self, password: str|bytes, cipherspec: str|tuple = 'AES-256-GCM', iv_or_nonce: bytes = None,
                  padding='random', buffering: int = 0xf5000, kdf_salt=None, **kwargs):
         """
         Use this method to initialize a new Crypter object with the specified parameters. Defaults are: AES cipher with
-        a 256 bit (32 byte) key and random IV. If a buffered method is used, the buffering parameter dictates how many
-        bytes with be read, processed, and yielded (with padding) until all data is read from the buffer. The buffered
-        methods are generators, and should be iterated over until all chunks are yielded. The IV is prepended to all
-        encrypted messages and assigned to the iv_or_nonce property of an instance for easy retrieval if needed. IV is
+        a 256 bit (32 byte) key and random 128 bit (16 byte) IV in GCM mode. If a buffered method is used, the buffering 
+        parameter dictates how many bytes with be read, processed, and yielded (with padding) until all data is read from 
+        the buffer. The buffered methods are generators, and should be iterated over until all chunks are yielded.
+        The IV is prepended to all encrypted messages and assigned to the iv_or_nonce property of an instance for easy retrieval if needed. IV is
         prepended to all messages. The key is derived from an appropriate algorithm using the user-supplied password.
         The key is derived using Scrypt with default params n=2**17, r=8, and p=1.
 
@@ -37,6 +36,8 @@ class Crypter:
             :key scrypt_n:
         """
         self._kwargs = kwargs
+        del kwargs
+        
         if not isinstance(cipherspec, tuple):
             cipherspec = Crypter.parse_cipherspec(cipherspec)
         elif len(cipherspec) != 3:
@@ -49,7 +50,6 @@ class Crypter:
         if (kdf_salt is not None) and (not isinstance(kdf_salt, bytes) or len(kdf_salt) > 64):
             raise TypeError('kdf_salt must be up to 64 bytes or None.')
         elif kdf_salt is None:
-            # kdf_salt = urandom(64)
             kdf_salt = digest(password, algo='sha3_256')
         elif len(kdf_salt) < 64:
             pad_zero(kdf_salt, 64)
@@ -58,9 +58,9 @@ class Crypter:
         self.kdf_salt = kdf_salt
         key = Scrypt(self.kdf_salt,
                      key_size // 8,
-                     kwargs.get('scrypt_n', 2 ** 16),
-                     kwargs.get('scrypt_r', 8),
-                     kwargs.get('scrypt_p', 1),
+                     self._kwargs.get('scrypt_n', 2 ** 16),
+                     self._kwargs.get('scrypt_r', 8),
+                     self._kwargs.get('scrypt_p', 1),
                      crypto_backend).derive(password)
         del password, key_size, kdf_salt
 
@@ -140,7 +140,7 @@ class Crypter:
 
             # return total
 
-        def buffered_decrypt(buffer: (IOBase, BytesIO)):
+        def buffered_decrypt(buffer: IOBase|BytesIO):
             """
             [See docstring for buffered_encrypt]
             Decrypts the contents of a buffer $buffersize bytes at a time.
@@ -166,7 +166,7 @@ class Crypter:
             yield unpadder.update(decryptor.finalize()) + unpadder.finalize()
             buffer.seek(_t)
 
-        def hmac_encrypt(string_or_bytes: (str, bytes), hmac_key: (str, bytes)=None, salt: bytes=None,
+        def hmac_encrypt(string_or_bytes: str|bytes, hmac_key: str|bytes = None, salt: bytes=None,
                          hash_algo='sha3_512'):
             """
             Encrypt a $string_or_bytes instance using the native algorithm, and authenticate using HMAC-$hash_algo.
@@ -226,7 +226,7 @@ class Crypter:
 
             return hmac_key, b''.join((salt, _hmac.digest(), string_or_bytes))
 
-        def hmac_decrypt(hmac_key: (str, bytes), _bytes: (str, bytes), hash_algo='sha3_512'):
+        def hmac_decrypt(hmac_key: str|bytes, _bytes: str|bytes, hash_algo='sha3_512'):
             """
             Decrypt $string_or_bytes using $hmac_key with an instance of HMAC-$hash_algo to verify integrity of message.
 
@@ -276,7 +276,7 @@ class Crypter:
 
             return unpad(_bytes, self._padding)
 
-        def encrypt(string_or_bytes: (str, bytes, bytearray)):
+        def encrypt(string_or_bytes: str|bytes|bytearray):
             """ A simple encryption. Data is padded and encrypted in a single call to the update method.
 
             :param string_or_bytes: Str or bytes-like object.
@@ -400,7 +400,7 @@ class Crypter:
         if isinstance(string, bytes):
             string = str(string, 'UTF-8')
         elif not isinstance(string, str):
-            raise TypeError('String but me a str or bytes instance.')
+            raise TypeError('String must be a str or bytes instance.')
 
         if string.count('-') == 2:
             cipher, key_size, mode = list(map(lambda x: x.casefold(), string.split('-')))
@@ -408,7 +408,7 @@ class Crypter:
             cipher, key_size = list(map(lambda x: x.casefold(), string.split('-')))
             mode = None
         else:
-            raise ValueError('Cipherspec must be formatted as {Cipher}-{Key Size}[-{Mode (ECB)}]. Ex: AES-256-CBC.')
+            raise ValueError('Cipherspec must be formatted as {Cipher}-{Key Size}[-{Mode (ECB)}]. Ex: AES-256-CBC')
 
         if cipher == 'aes':
             cipher = crypto_AES
@@ -463,8 +463,12 @@ class Crypter:
 
 
 class RSAPrivateKey:
-    """ Generate an RSA keypair of $bits length and $padding padded (applies to all operations) """
+    """ Generate an RSA keypair """
     def __init__(self, keypair: rsa.RSAPrivateKey, padding=PKCS1v15, exportable=False):
+
+        assert isinstance(keypair, rsa.RSAPrivateKey)
+        assert isinstance(padding, PKCS1v15)
+
         self.pubkey = keypair.public_key()
         self.padding = padding
 
@@ -477,8 +481,8 @@ class RSAPrivateKey:
 
             return key+message
 
-        def decrypt(message: (str, bytes)):
-            if not isinstance(message, (str, bytes)):
+        def decrypt(message: str|bytes):
+            if not isinstance(message, str|bytes):
                 return ValueError('Message must be a string or bytes instance')
 
             mdat, message = message[:256], message[256:]
@@ -755,7 +759,7 @@ def encrypt(message, key):
 def decrypt(message, key):
     
     c = Crypter(key)
-    message = c.decrypt(message[64:])
+    message = c.decrypt(message)
 
     return message
 

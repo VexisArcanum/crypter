@@ -157,7 +157,7 @@ class KeySchedule:
         elif password is None:
             raise ValueError('Must specify a password when encrypting exported KeySchedule.')
 
-    def extract(self, coordinate: (int, bytes)):
+    def extract(self, coordinate: int|bytes):
         """ Return raw data from schedule at coordinate [$coordinate:$coordinate+64]. WARNING: Do not share the values
          returned by this function. """
         coordinate = int.from_bytes(coordinate, 'little') if not isinstance(coordinate, int) else coordinate
@@ -165,19 +165,13 @@ class KeySchedule:
             raise ValueError('Coordinate cannot exceed {}'.format(self.period - 63))
         return self.raw[coordinate:coordinate + 64]
 
-    def keygen(self, coordinate=None, salt=None, digest_size=None, algo='sha512', iterations=1):
+    def keygen(self, coordinate=None, salt=None, digest_size=None, algo='sha3_512', iterations=100):
         """ Extract data from self.raw and hash using $algo for $iterations iterations. If $digest_size is smaller
         than that of $algo, then the output is truncated and XORed to produce the return value. If $digest_size is
         larger than that of $algo, then the digest is entended with the same round procedure, except the output extends
         the data instead of replacing it.
         """
-        if salt is None:
-            if self.salt:
-                salt = self.salt
-            else:
-                salt = b''
-        elif not isinstance(salt, bytes):
-            raise TypeError('Salt must be in bytes.')
+        salt = salt or Crypter.urandom(16)
 
         if algo not in hashlib.algorithms_available:
             raise ValueError('Algo must be one of {}'.format(hashlib.algorithms_available))
@@ -186,18 +180,16 @@ class KeySchedule:
         coordinate = urandom(self.n) if coordinate is None else coordinate
 
         k = self.extract(coordinate)
-        algo.update(k)
-        k = algo.digest()
+        #algo.update(k)
+        #k = algo.digest()
 
-        def _iter(_k, _i):
-            if _i <= 0:
-                return k
-            algo.update(_k)
-            return _iter(algo.digest(), _i-1)
-        k = _iter(k, iterations)
+        for _ in range(iterations):
+            algo.update(k)
+            k = algo.digest()
+
 
         if isinstance(digest_size, int):
-            if digest_size <= algo.digest_size:
+            if digest_size < algo.digest_size:
                 k = xor(k[digest_size:], k[:digest_size])
             else:
                 _last = k
@@ -206,11 +198,15 @@ class KeySchedule:
                     _last = algo.digest()
                     k += _last
 
-        return coordinate, k
+        return coordinate + salt + k
 
-    def verify(self, n, key, salt=None, algo='sha512', iterations=1):
+    def verify(self, token, algo='sha3_512', iterations=100):
         """ Verify that a given key was derived from the current schedule. """
-        return hmac.compare_digest(self.keygen(n, salt, len(key), algo, iterations)[1], key)
+        coordinate = token[:self.n]
+        salt = token[self.n:self.n+16]
+        key = token[self.n+16:]
+
+        return hmac.compare_digest(self.keygen(coordinate, salt, len(key), algo, iterations)[self.n+16:], key)
 
     @classmethod
     def new(cls, password, salt=None, n=1, scrypt_n=2**16):
